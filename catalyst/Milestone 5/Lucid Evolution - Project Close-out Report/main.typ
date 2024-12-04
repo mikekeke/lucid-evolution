@@ -293,4 +293,4 @@ Lucid Evolution has successfully transformed from a library migration project in
 
 #v(25pt)
 #align(center)[== Close-out Video <link-other>
-- #link("https://youtu.be/k6ovQpRyUOM")[Youtube]]
+- #link("https://youtu.be/PFe5cHuQ8oM?si=YUdaW9wjYZ__0aFR")[Youtube]]
