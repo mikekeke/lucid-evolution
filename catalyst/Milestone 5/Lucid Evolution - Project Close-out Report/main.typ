@@ -21,7 +21,7 @@
 
 // Center-align the report title
 #align(center)[#strong[Lucid Evolution]\
-#set text(15pt); Project Close-out Report]
+#set text(15pt); Project Close-out Report\ Fund 11: Cardano Open - Developers]
 
 #v(5.5cm)
 
