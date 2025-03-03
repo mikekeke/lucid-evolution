@@ -17,6 +17,7 @@ import {
   ScriptType,
   StakeKeyHash,
   TxOutput,
+  Unit,
   UTxO,
 } from "@lucid-evolution/core-types";
 import * as Collect from "./internal/Collect.js";
@@ -31,6 +32,7 @@ import * as Pool from "./internal/Pool.js";
 import * as Governance from "./internal/Governance.js";
 import * as Metadata from "./internal/Metadata.js";
 import * as CompleteTxBuilder from "./internal/CompleteTxBuilder.js";
+import * as PisaCompleteTxBuilder from "./internal/PisaCompleteTxBuilder.js";
 import * as TxSignBuilder from "../tx-sign-builder/TxSignBuilder.js";
 import { TransactionError } from "../Errors.js";
 import { Either } from "effect/Either";
@@ -38,6 +40,7 @@ import { Effect, Layer, pipe } from "effect";
 import { handleRedeemerBuilder } from "./internal/TxUtils.js";
 import { addAssets } from "@lucid-evolution/utils";
 import { TxConfig } from "./internal/Service.js";
+import { TxSigned } from "../tx-submit/TxSubmit.js";
 
 export type TxBuilderConfig = {
   readonly lucidConfig: LucidConfig;
@@ -241,6 +244,12 @@ export type TxBuilder = {
   setMinFee: (fee: bigint) => TxBuilder;
   complete: (
     options?: CompleteTxBuilder.CompleteOptions,
+  ) => Promise<TxSignBuilder.TxSignBuilder>;
+  completeWithPisa: (
+    pisaUrl: string,
+    position: string,
+    swapAssets: Unit[],
+    options?: PisaCompleteTxBuilder.PisaCompleteOptions,
   ) => Promise<TxSignBuilder.TxSignBuilder>;
   completeProgram: (
     options?: CompleteTxBuilder.CompleteOptions,
@@ -623,6 +632,24 @@ export function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder {
           CompleteTxBuilder.complete(options),
           Effect.provide(configLayer),
           Effect.map((result) => result[2]),
+        ),
+      ).unsafeRun(),
+    completeWithPisa: (
+      pisaUrl: string,
+      position: string, 
+      swapAssets: Unit[],
+      options?: PisaCompleteTxBuilder.PisaCompleteOptions,
+    ) =>
+      makeReturn(
+        pipe(
+          PisaCompleteTxBuilder.completeSingle(
+            pisaUrl,
+            position,
+            swapAssets,
+            options,
+          ),
+          Effect.provide(configLayer),
+          Effect.map((result) => result),
         ),
       ).unsafeRun(),
     completeProgram: (options?: CompleteTxBuilder.CompleteOptions) =>
