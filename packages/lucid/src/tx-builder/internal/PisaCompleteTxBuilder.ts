@@ -49,25 +49,8 @@ import { sum } from "effect/BigInt";
 import * as CompleteTxBuilder from "./CompleteTxBuilder.js";
 import { completePartialPrograms } from "./CompleteTxBuilder.js";
 import { v4 as uuidv4 } from 'uuid';
+import { mkFakeInBalanceRequest } from "./PisaCompleteTxTypes.js";
 
-
-const PisaRequestSchema = Schema.Struct({
-  f: Schema.UUID
-
-})
-
-// type PisaRequest = {
-//   requestId: "6fb8473d-807c-40b6-b4ca-478664b96ef4", // TODO: generate UUID
-//   requestType: "reBalanceCbor",
-//   payload: {
-//     positionRef: position,
-//     swapAssets: swapAssets,
-//     unbalancedTxCbor: transaction.to_cbor_hex(),
-//     userAddresses: [walletAddress],
-//     userChangeAddress: changeAddress,
-//     userCollateral: collateral,
-//   },
-// }
 
 const connect = async (url: string): Promise<WebSocket> => {
   return new Promise((resolve) => {
@@ -84,8 +67,8 @@ const connect = async (url: string): Promise<WebSocket> => {
 
 export type Pisa = {
   completeWithPisaUnsafe: (
-    position: string,
-    swapAssets: string[],
+    position: OutRef,
+    swapAssets: Unit[],
     options?: PisaCompleteOptions,
   ) => Promise<TxSignBuilder.TxSignBuilder>;
   finalize: () => void;
@@ -100,8 +83,8 @@ export const Pisa = async (
 
   return {
     completeWithPisaUnsafe: (
-      position: string,
-      swapAssets: string[],
+      position: OutRef,
+      swapAssets: Unit[],
       options: PisaCompleteOptions = {},
     ) => {
       const configLayer = Layer.succeed(TxConfig, { config: builderConf });
@@ -123,7 +106,7 @@ export const Pisa = async (
 
 export const completeSingle = (
   pisaUrl: string,
-  position: string,
+  position: OutRef,
   swapAssets: Unit[],
   options: PisaCompleteOptions = {},
 ) =>
@@ -147,7 +130,10 @@ const pickBalancer = (mode?: PisaBalancingMode) => {
   }
 }
 
-const wsRequestResponse = (ws: WebSocket, pisaRequest: any) => Effect.gen(function* () { // TODO: proper type for pisa request
+
+// TODO: proper type for pisa request
+// TODO: verify that response id matches request id
+const wsRequestResponse = (ws: WebSocket, pisaRequest: any) => Effect.gen(function* () {
   ws.send(JSON.stringify(pisaRequest));
   const waitReceiveEff: Effect.Effect<string, never, never> = Effect.promise(
     () =>
@@ -166,96 +152,10 @@ const toPisaRepr = (unit: Unit): string => {
   return unit.substring(0, index) + "." + unit.substring(index);
 }
 
-// does not work with scripts
-export const completeCoreCustomBalance = (
-  ws: WebSocket,
-  position: string,
-  swapAssets: string[],
-  options: PisaCompleteOptions = {},
-) =>
-  Effect.gen(function* () {
-    console.log("Completing with Pisa");
-    // const ws = yield* Effect.promise(() => connected);
-    const { config } = yield* TxConfig;
-    const wallet: Wallet = yield* pipe(
-      Effect.fromNullable(config.lucidConfig.wallet),
-      Effect.orElseFail(() => completeTxError(ERROR_MESSAGE.MISSING_WALLET)),
-    );
-    const walletAddress: string = yield* Effect.promise(() => wallet.address());
-
-
-    const { changeAddress = walletAddress, collateral = null } = options;
-
-    // Execute programs sequentially
-    yield* Effect.all(config.programs);
-    const outsAssets = config.totalOutputAssets;
-
-    const extra: bigint = 3000000n // TODO: need/better to add exact fee so inevitable balancing from CML won't add any change outs at all
-    outsAssets.lovelace = outsAssets.lovelace ? outsAssets.lovelace + extra : extra;
-
-    const fakeInUtxo: UTxO = {
-      txHash:
-        "0000000000000000000000000000000000000000000000000000000000000000",
-      outputIndex: 0,
-      assets: outsAssets,
-      address: walletAddress,
-    };
-    const fakeInput = CML.SingleInputBuilder.from_transaction_unspent_output(
-      utxoToCore(fakeInUtxo),
-    ).payment_key();
-    config.txBuilder.add_input(fakeInput);
-
-    // TODO: set collateral or build w/o it? Atlas will add collateral
-    const transaction = yield* Effect.try({
-      try: () =>
-        config.txBuilder
-          .build(
-            CML.ChangeSelectionAlgo.Default,
-            CML.Address.from_bech32(changeAddress),
-          )
-          .build_unchecked(),
-      catch: (error) => completeTxError(error),
-    });
-
-    const reBalanceRequest = {
-      requestId: uuidv4(),
-      requestType: "reBalanceCbor",
-      payload: {
-        positionRef: position,
-        swapAssets: swapAssets,
-        unbalancedTxCbor: transaction.to_cbor_hex(),
-        userAddresses: [walletAddress],
-        userChangeAddress: changeAddress,
-        userCollateral: collateral,
-      },
-    };
-
-    const parsedResponse = yield* wsRequestResponse(ws, reBalanceRequest);
-    const unfixedTx = CML.Transaction.from_cbor_hex(parsedResponse.data.balancedCbor)
-    console.log("unfixedTx", unfixedTx.to_js_value())
-
-    const sigBuilderComplete = TxSignBuilder.makeTxSignBuilder(
-      wallet,
-      unfixedTx,
-    ).complete()
-
-    const sigBuilder = yield* Effect.promise(() => sigBuilderComplete);
-
-    const costModels = config.lucidConfig.costModels
-    const fixedTx = yield* Effect.promise(() => fixHashes(sigBuilder.toTransaction(), costModels));
-
-    const fixedSigBuilder = TxSignBuilder.makeTxSignBuilder(
-      wallet,
-      fixedTx
-    )
-    return fixedSigBuilder;
-
-  }).pipe(Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
-
 export const completeCoreRebalance = (
   ws: WebSocket,
-  position: string,
-  swapAssets: string[],
+  position: OutRef,
+  swapAssets: Unit[],
   options: PisaCompleteOptions = {},
 ) =>
   Effect.gen(function* () {
@@ -356,8 +256,8 @@ const completeWithFakeIn = (fakeIns: UTxO[], changeAddress: string) => Effect.ge
 
 export const completeCoreFakeInput = (
   ws: WebSocket,
-  position: string,
-  swapAssets: string[],
+  position: OutRef,
+  swapAssets: Unit[],
   options: PisaCompleteOptions = {},
 ) =>
   Effect.gen(function* () {
@@ -369,8 +269,7 @@ export const completeCoreFakeInput = (
     // internal CML.TransactionBuilder should have initial state at this moment
     // This approach assumes that nothing yet happened with the state of CML.TransactionBuilder
     // before CompleteTxBuilder.complete(...) is called
-    const clonedConfig = cloneConfig(config)
-
+    const clonedLayer = Layer.succeed(TxConfig, { config: cloneConfig(config) });
 
     const wallet: Wallet = yield* pipe(
       Effect.fromNullable(config.lucidConfig.wallet),
@@ -379,7 +278,7 @@ export const completeCoreFakeInput = (
     const walletAddress: string = yield* Effect.promise(() => wallet.address());
 
 
-    const { changeAddress = walletAddress, collateral = null } = options;
+    const { changeAddress = walletAddress, collateral = undefined } = options;
 
     const compOptions = {
       changeAddress: changeAddress,
@@ -398,7 +297,6 @@ export const completeCoreFakeInput = (
 
     requiredOutValue.lovelace = withCollateralCovered + somethingToCoverFee
 
-
     const fakeInUtxo: UTxO = {
       txHash:
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -408,34 +306,24 @@ export const completeCoreFakeInput = (
     };
     const fakeBalancingUtxos = [fakeInUtxo]
 
-
-    const clonedLayer = Layer.succeed(TxConfig, { config: clonedConfig });
-
     const completed = yield* Effect.provide(completeWithFakeIn(fakeBalancingUtxos, changeAddress), clonedLayer)
 
-    const reBalanceRequest = {
-      requestId: uuidv4(),
-      requestType: "balanceWithFakeInCbor",
-      payload: {
-        positionRef: position,
-        swapAssets: swapAssets,
-        unbalancedTxCbor: completed.toTransaction().to_cbor_hex(),
-        userAddresses: [walletAddress],
-        userChangeAddress: changeAddress,
-        userCollateral: collateral,
-      },
-    };
+    const reBalanceRequest = mkFakeInBalanceRequest(
+      position,
+      swapAssets,
+      completed.toTransaction(),
+      walletAddress,
+      changeAddress,
+      collateral
+    );
 
     const parsedResponse = yield* wsRequestResponse(ws, reBalanceRequest);
-    const unfixedTx = CML.Transaction.from_cbor_hex(parsedResponse.data.balancedCbor)
-    console.log("unfixedTx", unfixedTx.to_js_value())
 
-    const sigBuilderComplete = TxSignBuilder.makeTxSignBuilder(
-      wallet,
-      unfixedTx,
-    ).complete()
-
-    const sigBuilder = yield* Effect.promise(() => sigBuilderComplete);
+    const sigBuilder = yield* Effect.promise(() =>
+      TxSignBuilder.makeTxSignBuilder(
+        wallet,
+        CML.Transaction.from_cbor_hex(parsedResponse.data.balancedCbor),
+      ).complete());
 
     const costModels = config.lucidConfig.costModels
     const fixedTx = yield* Effect.promise(() => fixHashes(sigBuilder.toTransaction(), costModels));

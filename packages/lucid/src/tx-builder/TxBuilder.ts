@@ -8,6 +8,7 @@ import {
   DRep,
   Label,
   Lovelace,
+  OutRef,
   PaymentKeyHash,
   PoolId,
   Redeemer,
@@ -247,7 +248,7 @@ export type TxBuilder = {
   ) => Promise<TxSignBuilder.TxSignBuilder>;
   completeWithPisa: (
     pisaUrl: string,
-    position: string,
+    position: OutRef,
     swapAssets: Unit[],
     options?: PisaCompleteTxBuilder.PisaCompleteOptions,
   ) => Promise<TxSignBuilder.TxSignBuilder>;
@@ -636,7 +637,7 @@ export function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder {
       ).unsafeRun(),
     completeWithPisa: (
       pisaUrl: string,
-      position: string, 
+      position: OutRef, 
       swapAssets: Unit[],
       options?: PisaCompleteTxBuilder.PisaCompleteOptions,
     ) =>
