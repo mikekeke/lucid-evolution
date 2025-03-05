@@ -637,7 +637,7 @@ export function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder {
       ).unsafeRun(),
     completeWithPisa: (
       pisaUrl: string,
-      position: OutRef, 
+      position: OutRef,
       swapAssets: Unit[],
       options?: PisaCompleteTxBuilder.PisaCompleteOptions,
     ) =>
