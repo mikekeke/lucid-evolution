@@ -28,7 +28,7 @@ const toPiaAssetRepr = (unit: Unit): string => {
   return unit.substring(0, index) + "." + unit.substring(index);
 };
 
-type PisaBalanceMethod = "reBalanceCbor" | "balanceWithFakeInCbor";
+export type PisaBalanceMethod = "reBalanceCbor" | "balanceWithFakeInCbor";
 
 export const mkRequest = (
   balanceMethod: PisaBalanceMethod,
@@ -161,3 +161,6 @@ export const parseSuccessResponse = (
 
 export const pisaBalanceError = (error: unknown) =>
   new TxBuilderError({ cause: `{ Pisa balance: ${error} }` });
+
+export const completeTxError = (cause: unknown) =>
+  new TxBuilderError({ cause: `{ Complete: ${cause} }` });
