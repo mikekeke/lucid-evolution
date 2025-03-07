@@ -19,15 +19,6 @@ export type PisaRequest = {
   };
 };
 
-const renderOutRef = (outRef: OutRef): string => {
-  return outRef.txHash + "#" + outRef.outputIndex;
-};
-
-const toPiaAssetRepr = (unit: Unit): string => {
-  const index = 28 * 2;
-  return unit.substring(0, index) + "." + unit.substring(index);
-};
-
 export type PisaBalanceMethod = "reBalanceCbor" | "balanceWithFakeInCbor";
 
 export const mkRequest = (
@@ -43,12 +34,12 @@ export const mkRequest = (
     requestId: uuidv4(),
     requestType: balanceMethod,
     payload: {
-      positionRef: renderOutRef(position),
+      positionRef: toPisaOutRefRepr(position),
       swapAssets: swapAssets.map(toPiaAssetRepr),
       unbalancedTxCbor: transaction.to_cbor_hex(),
       userAddresses: [walletAddress],
       userChangeAddress: changeAddress,
-      userCollateral: collateral ? renderOutRef(collateral) : null,
+      userCollateral: collateral ? toPisaOutRefRepr(collateral) : null,
     },
   };
 };
@@ -157,6 +148,15 @@ export const parseSuccessResponse = (
     onFailure: (error) => Effect.fail(pisaBalanceError(error)),
     onSuccess: (resp) => checkResponse(resp),
   });
+};
+
+const toPisaOutRefRepr = (outRef: OutRef): string => {
+  return outRef.txHash + "#" + outRef.outputIndex;
+};
+
+const toPiaAssetRepr = (unit: Unit): string => {
+  const index = 28 * 2;
+  return unit.substring(0, index) + "." + unit.substring(index);
 };
 
 export const pisaBalanceError = (error: unknown) =>
