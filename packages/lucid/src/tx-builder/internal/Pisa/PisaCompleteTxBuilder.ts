@@ -13,12 +13,16 @@ import {
   UTxO,
   Wallet,
 } from "@lucid-evolution/core-types";
-import { ERROR_MESSAGE, RunTimeError, TransactionError } from "../../Errors.js";
-import { CML, makeReturn } from "../../core.js";
-import * as TxBuilder from "../TxBuilder.js";
-import * as TxSignBuilder from "../../tx-sign-builder/TxSignBuilder.js";
-import { TxConfig } from "./Service.js";
-import * as CompleteTxBuilder from "./CompleteTxBuilder.js";
+import {
+  ERROR_MESSAGE,
+  RunTimeError,
+  TransactionError,
+} from "../../../Errors.js";
+import { CML, makeReturn } from "../../../core.js";
+import * as TxBuilder from "../../TxBuilder.js";
+import * as TxSignBuilder from "../../../tx-sign-builder/TxSignBuilder.js";
+import { TxConfig } from "../Service.js";
+import * as CompleteTxBuilder from "../CompleteTxBuilder.js";
 import {
   completeTxError,
   mkBalanceRequest,
@@ -49,6 +53,38 @@ export type Pisa = {
   finalize: () => void;
 };
 
+/**
+ * Provides access to Pisa Fees balancing service to balance transaction and pay fee with token(s).
+ *
+ * **Warning:** When initiated, opens web socket connection.
+ *  User should close connection when needed by calling `.finalize()`.
+ *
+ * @example
+ * ```ts
+ * const pisaUrl = 'https://8.8.8.8:8888';
+ * const swapPosition: OutRef = {
+ *   txHash: "4d3cf2ee492d688be15967e5d0dc695defaf46a5674cfbee684e64b341b1839a",
+ *   outputIndex: 1
+ * };
+ * const swapAssets: Unit[] = [
+ *   somePolicyId + fromText("TokenToPayFee")
+ * ];
+ *
+ * const txBuilder = lucid
+ *   .newTx()
+ *   .pay.ToAddress(payToAddr, { [somePolicyId + fromText("SomeToken")]: 1n });
+ *
+ * const pisa = await Pisa(pisaUrl);
+ *
+ * const tx: TxSignBuilder =
+ *  await pisa.usingBuilder(txBuilder)
+ *    .complete(swapPosition, swapAssets);
+ *
+ * pisa.finalize(); // can be called anywhere when needed, to close web socket connection
+ * const signedTx = await tx.sign.withWallet().complete();
+ * await signedTx.submit();
+ * ```
+ */
 export const Pisa = async (pisaUrl: string): Promise<Pisa> => {
   const pws: PisaSocket = await connect(pisaUrl);
 
@@ -96,7 +132,11 @@ export const Pisa = async (pisaUrl: string): Promise<Pisa> => {
     },
   };
 };
-
+/**
+ * Returns `Effect` that will open web socket, perform balancing using Pisa Fees service,
+ * close web socket and return result of type `TxSignBuilder`.
+ * Used in `TxSignBuilder.completeWithPisa(...)`
+ */
 export const completeSingle = (
   pisaUrl: string,
   position: OutRef,
@@ -123,7 +163,23 @@ export const completeSingle = (
   );
 };
 
-export const completeWithDummyInput = (
+/**
+ * Ideally we want completely unbalanced transaction with non-adjusted outputs,
+ * but it seems to be impossible to get using CML transaction builder.
+ * To mitigate consequences of balancing, this function uses following approach:
+ *
+ * - figure out total value of outputs produced by transaction
+ * - make dummy UTxO that covers outputs value, collateral and fee and use it exclusively for balancing
+ * via `CompleteTxBuilder`
+ * - send transaction via request message that notifies Pisa Fees service that transaction
+ * was balanced and adjusted in known way
+ *
+ * After receiving such request, Pisa Fees balancer will do the following:
+ * - remove dummy input used for balancing from inputs (if such input is missing, it will return an error)
+ * - remove all outputs w/o scripts and Datums that are sent to change address, and recalculate change during balancing
+ * - re-adjust inputs that were adjusted by adding minimum Ada value
+ */
+const completeWithDummyInput = (
   pws: PisaSocket,
   position: OutRef,
   swapAssets: Unit[],
@@ -192,6 +248,10 @@ const cloneConfig = (
   return configClone;
 };
 
+/**
+ * Build dummy input for balancing with lucid-evolution.
+ * Input should be big enough to cover outputs Value.
+ */
 const mkBalancingOptions = (
   requiredValue: Assets,
   walletAddress: Address,
@@ -294,6 +354,10 @@ const runWsRequest = (pws: PisaSocket, pisaRequest: PisaRequest) =>
     return response;
   });
 
+/**
+ * Wrapper for web socket that provides helper request-response function
+ * and throws error if server disconnects unexpectedly.
+ */
 type PisaSocket = {
   runBalanceRequest: (pisaRequest: PisaRequest) => Promise<string>;
   shutDown: () => void;

@@ -1,7 +1,7 @@
 import { Effect, Array as _Array, BigInt as _BigInt } from "effect";
 import { Address, OutRef, Unit } from "@lucid-evolution/core-types";
-import { TxBuilderError } from "../../Errors.js";
-import { CML } from "../../core.js";
+import { TxBuilderError } from "../../../Errors.js";
+import { CML } from "../../../core.js";
 import * as S from "@effect/schema/Schema";
 import { v4 as uuidv4 } from "uuid";
 import { ParseError } from "@effect/schema/ParseResult";
