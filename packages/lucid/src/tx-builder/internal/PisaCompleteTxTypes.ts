@@ -19,7 +19,7 @@ export type PisaRequest = {
   };
 };
 
-export type PisaBalanceMethod = "reBalanceCbor" | "balanceWithFakeInCbor";
+export type PisaBalanceMethod = "balanceAdjustedCbor";
 
 export const mkRequest = (
   balanceMethod: PisaBalanceMethod,
@@ -44,7 +44,7 @@ export const mkRequest = (
   };
 };
 
-export const mkFakeInBalanceRequest = (
+export const mkBalanceRequest = (
   position: OutRef,
   swapAssets: Unit[],
   transaction: CML.Transaction,
@@ -53,26 +53,7 @@ export const mkFakeInBalanceRequest = (
   collateral?: OutRef,
 ): PisaRequest => {
   return mkRequest(
-    "balanceWithFakeInCbor",
-    position,
-    swapAssets,
-    transaction,
-    walletAddress,
-    changeAddress,
-    collateral,
-  );
-};
-
-export const mkReBalanceRequest = (
-  position: OutRef,
-  swapAssets: Unit[],
-  transaction: CML.Transaction,
-  walletAddress: Address,
-  changeAddress: Address,
-  collateral?: OutRef,
-): PisaRequest => {
-  return mkRequest(
-    "reBalanceCbor",
+    "balanceAdjustedCbor",
     position,
     swapAssets,
     transaction,

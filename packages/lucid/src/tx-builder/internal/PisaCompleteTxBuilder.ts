@@ -7,17 +7,13 @@ import {
 } from "effect";
 import {
   Address,
+  Assets,
   OutRef,
   Unit,
   UTxO,
   Wallet,
 } from "@lucid-evolution/core-types";
-import {
-  ERROR_MESSAGE,
-  RunTimeError,
-  TransactionError,
-  TxBuilderError,
-} from "../../Errors.js";
+import { ERROR_MESSAGE, RunTimeError, TransactionError } from "../../Errors.js";
 import { CML, makeReturn } from "../../core.js";
 import * as TxBuilder from "../TxBuilder.js";
 import * as TxSignBuilder from "../../tx-sign-builder/TxSignBuilder.js";
@@ -25,11 +21,9 @@ import { TxConfig } from "./Service.js";
 import * as CompleteTxBuilder from "./CompleteTxBuilder.js";
 import {
   completeTxError,
-  mkFakeInBalanceRequest,
-  mkReBalanceRequest,
+  mkBalanceRequest,
   parseSuccessResponse,
   pisaBalanceError,
-  PisaBalanceMethod,
   PisaRequest,
 } from "./PisaCompleteTxTypes.js";
 import { Either } from "effect/Either";
@@ -37,26 +31,24 @@ import { Either } from "effect/Either";
 export type PisaCompleteOptions = {
   changeAddress?: Address;
   collateral?: OutRef;
-  mode?: PisaBalanceMethod;
 };
 
 export type Pisa = {
-  completeWithPisaSafe: (
-    builder: TxBuilder.TxBuilder,
-    position: OutRef,
-    swapAssets: Unit[],
-    options?: PisaCompleteOptions,
-  ) => Promise<Either<TxSignBuilder.TxSignBuilder, TransactionError>>;
-  completeWithPisa: (
-    builder: TxBuilder.TxBuilder,
-    position: OutRef,
-    swapAssets: Unit[],
-    options?: PisaCompleteOptions,
-  ) => Promise<TxSignBuilder.TxSignBuilder>;
+  usingBuilder: (builder: TxBuilder.TxBuilder) => {
+    completeSafe: (
+      position: OutRef,
+      swapAssets: Unit[],
+      options?: PisaCompleteOptions,
+    ) => Promise<Either<TxSignBuilder.TxSignBuilder, TransactionError>>;
+    complete: (
+      position: OutRef,
+      swapAssets: Unit[],
+      options?: PisaCompleteOptions,
+    ) => Promise<TxSignBuilder.TxSignBuilder>;
+  };
   finalize: () => void;
 };
 
-// TODO: add to export lists properly
 export const Pisa = async (pisaUrl: string): Promise<Pisa> => {
   const pws: PisaSocket = await connect(pisaUrl);
 
@@ -70,36 +62,34 @@ export const Pisa = async (pisaUrl: string): Promise<Pisa> => {
       config: builder.rawConfig(),
     });
     return pipe(
-      pickBalancer(options.mode)(pws, position, swapAssets, options),
+      completeWithDummyInput(pws, position, swapAssets, options),
       Effect.provide(configLayer),
       Effect.map((result) => result),
     );
   };
-
   return {
-    completeWithPisaSafe: (
-      builder: TxBuilder.TxBuilder,
-
-      position: OutRef,
-      swapAssets: Unit[],
-      options: PisaCompleteOptions = {},
-    ) => {
-      return makeReturn(
-        mkProgram(builder, position, swapAssets, options),
-      ).safeRun();
+    usingBuilder: (builder: TxBuilder.TxBuilder) => {
+      return {
+        completeSafe: (
+          position: OutRef,
+          swapAssets: Unit[],
+          options: PisaCompleteOptions = {},
+        ) => {
+          return makeReturn(
+            mkProgram(builder, position, swapAssets, options),
+          ).safeRun();
+        },
+        complete: (
+          position: OutRef,
+          swapAssets: Unit[],
+          options: PisaCompleteOptions = {},
+        ) => {
+          return makeReturn(
+            mkProgram(builder, position, swapAssets, options),
+          ).unsafeRun();
+        },
+      };
     },
-
-    completeWithPisa: (
-      builder: TxBuilder.TxBuilder,
-      position: OutRef,
-      swapAssets: Unit[],
-      options: PisaCompleteOptions = {},
-    ) => {
-      return makeReturn(
-        mkProgram(builder, position, swapAssets, options),
-      ).unsafeRun();
-    },
-
     finalize: () => {
       console.log("Closing Pisa WS connection");
       pws.shutDown();
@@ -113,15 +103,13 @@ export const completeSingle = (
   swapAssets: Unit[],
   options: PisaCompleteOptions = {},
 ) => {
-  console.log("Complete single");
   const acquireWs = Effect.tryPromise({
     try: () => connect(pisaUrl),
-    catch: () => pisaBalanceError("Pisa WS connection error"),
+    catch: () => pisaBalanceError("Pisa web socket connection error"),
   });
 
   const releaseWs = (res: PisaSocket) =>
     Effect.gen(function* () {
-      console.log("Release:Closing pisa WS");
       res.shutDown();
     });
 
@@ -130,119 +118,35 @@ export const completeSingle = (
   return Effect.scoped(
     Effect.gen(function* () {
       const pws = yield* wsResource;
-      return yield* pickBalancer(options.mode)(
-        pws,
-        position,
-        swapAssets,
-        options,
-      );
+      return yield* completeWithDummyInput(pws, position, swapAssets, options);
     }),
   );
 };
 
-// TODO: better to decide on a single balancing mode before wrapping up integration
-
-const completeWithRebalance = (
+export const completeWithDummyInput = (
   pws: PisaSocket,
   position: OutRef,
   swapAssets: Unit[],
   options: PisaCompleteOptions = {},
 ) =>
   Effect.gen(function* () {
-    console.log("Completing with Pisa by rebalancing");
     const { config } = yield* TxConfig;
     const wallet: Wallet = yield* getWallet(config);
     const walletAddress: string = yield* Effect.promise(() => wallet.address());
 
     const { changeAddress = walletAddress, collateral = undefined } = options;
 
-    const compOptions = {
-      coinSelection: false,
-      changeAddress: changeAddress,
-      localUPLCEval: false,
-      setCollateral: 5_000_000n,
-      canonical: false,
-      includeLeftoverLovelaceAsFee: false,
-      presetWalletInputs: [],
-    };
-    const completed = (yield* CompleteTxBuilder.complete(compOptions))[2];
+    const valueRequiredToBalanceTx = yield* calculateRequiredValue(config);
 
-    const reBalanceRequest = mkReBalanceRequest(
-      position,
-      swapAssets,
-      completed.toTransaction(),
+    const artificialBalanceOptions = mkBalancingOptions(
+      valueRequiredToBalanceTx,
       walletAddress,
       changeAddress,
-      collateral,
     );
-    const pisaResponse = yield* runWsRequest(pws, reBalanceRequest);
-    const unfixedTx = CML.Transaction.from_cbor_hex(pisaResponse.balancedCbor);
+    const completed: TxSignBuilder.TxSignBuilder =
+      (yield* CompleteTxBuilder.complete(artificialBalanceOptions))[2];
 
-    const sigBuilder = yield* Effect.promise(() =>
-      TxSignBuilder.makeTxSignBuilder(wallet, unfixedTx).complete(),
-    );
-
-    const fixedTx = yield* fixHashes(sigBuilder.toTransaction());
-    return TxSignBuilder.makeTxSignBuilder(wallet, fixedTx);
-  }).pipe(Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
-
-export const completeWithFakeInput = (
-  pws: PisaSocket,
-  position: OutRef,
-  swapAssets: Unit[],
-  options: PisaCompleteOptions = {},
-) =>
-  Effect.gen(function* () {
-    console.log("Completing with Pisa via fake input");
-    const { config } = yield* TxConfig;
-
-    // TODO: revisit and make sure it is how it works
-    // clone config before mutable state of TxBuilderConfig  will be further changed during lucid balancing
-    // internal CML.TransactionBuilder should have initial state at this moment
-    // This approach assumes that nothing yet happened with the state of CML.TransactionBuilder
-    // before CompleteTxBuilder.complete(...) is called
-    const clonedLayer = Layer.succeed(TxConfig, {
-      config: cloneConfig(config),
-    });
-
-    const wallet: Wallet = yield* getWallet(config);
-    const walletAddress: string = yield* Effect.promise(() => wallet.address());
-
-    const { changeAddress = walletAddress, collateral = undefined } = options;
-
-    const compOptions = {
-      changeAddress: changeAddress,
-    };
-    const _preCompleted: TxSignBuilder.TxSignBuilder =
-      (yield* CompleteTxBuilder.complete(compOptions))[2];
-
-    const collateralSize = 5000000n; //TODO: need to be set somewhere hard for Pisa or propagated here from ops
-    const requiredOutValue = config.totalOutputAssets;
-    const lovelaceInTx = requiredOutValue.lovelace ?? 0n;
-    const withCollateralCovered =
-      collateralSize - lovelaceInTx < 0n
-        ? lovelaceInTx
-        : lovelaceInTx + (collateralSize - lovelaceInTx);
-
-    const somethingToCoverFee = 2000000n;
-
-    requiredOutValue.lovelace = withCollateralCovered + somethingToCoverFee;
-
-    const fakeInUtxo: UTxO = {
-      txHash:
-        "0000000000000000000000000000000000000000000000000000000000000000",
-      outputIndex: 0,
-      assets: requiredOutValue,
-      address: walletAddress,
-    };
-    const fakeBalancingUtxos = [fakeInUtxo];
-
-    const completed = yield* Effect.provide(
-      mkBuilderWithFakeIn(fakeBalancingUtxos, changeAddress),
-      clonedLayer,
-    );
-
-    const request = mkFakeInBalanceRequest(
+    const request = mkBalanceRequest(
       position,
       swapAssets,
       completed.toTransaction(),
@@ -259,35 +163,60 @@ export const completeWithFakeInput = (
         CML.Transaction.from_cbor_hex(parsedResponse.balancedCbor),
       ).complete(),
     );
-
     const fixedTx = yield* fixHashes(sigBuilder.toTransaction());
-
-    const fixedSigBuilder = TxSignBuilder.makeTxSignBuilder(wallet, fixedTx);
-    return fixedSigBuilder;
+    return TxSignBuilder.makeTxSignBuilder(wallet, fixedTx);
   }).pipe(Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
 
-const mkBuilderWithFakeIn = (fakeIns: UTxO[], changeAddress: string) =>
+const calculateRequiredValue = (config: TxBuilder.TxBuilderConfig) =>
   Effect.gen(function* () {
-    const collateralSize = 5_000_000n;
-    const compOptions = {
-      changeAddress: changeAddress,
-      presetWalletInputs: fakeIns,
-      setCollateral: collateralSize,
-    };
-    return (yield* CompleteTxBuilder.complete(compOptions))[2];
+    // need to evaluate programs to get `config.totalOutputAssets`
+    // but evaluating will cause `config` state mutation
+    // to mitigate this, cloning config here and use it for evaluation,
+    // so original config can be used later to `.complete()` with dummy balancing input
+    const clonedConfig = cloneConfig(config);
+    // need to evaluate programs to set `clonedConfig.totalOutputAssets`
+    yield* Effect.provide(
+      Effect.all(clonedConfig.programs),
+      Layer.succeed(TxConfig, { config: clonedConfig }),
+    );
+    return clonedConfig.totalOutputAssets;
   });
 
-// Utilities
 const cloneConfig = (
   cfg: TxBuilder.TxBuilderConfig,
 ): TxBuilder.TxBuilderConfig => {
-  const copyConfig = { ...cfg };
-  copyConfig.txBuilder = CML.TransactionBuilder.new(
-    copyConfig.lucidConfig.txbuilderconfig,
+  const configClone = { ...cfg };
+  configClone.txBuilder = CML.TransactionBuilder.new(
+    configClone.lucidConfig.txbuilderconfig,
   );
-  return copyConfig;
+  return configClone;
 };
 
+const mkBalancingOptions = (
+  requiredValue: Assets,
+  walletAddress: Address,
+  changeAddress: Address,
+) => {
+  const somethingToCoverFee = 4_000_000n;
+  const collateralSize = 5_000_000n;
+  requiredValue.lovelace =
+    (requiredValue.lovelace ?? 0n) + collateralSize + somethingToCoverFee;
+
+  const dummyInUtxo: UTxO = {
+    txHash: "0000000000000000000000000000000000000000000000000000000000000000",
+    outputIndex: 0,
+    assets: requiredValue,
+    address: walletAddress,
+  };
+
+  return {
+    changeAddress: changeAddress,
+    presetWalletInputs: [dummyInUtxo],
+    setCollateral: collateralSize,
+  };
+};
+
+// Utilities
 const getWallet = (config: TxBuilder.TxBuilderConfig) =>
   pipe(
     Effect.fromNullable(config.lucidConfig.wallet),
@@ -343,19 +272,6 @@ const fixHashes = (tx: CML.Transaction) =>
       tx.auxiliary_data(),
     );
   });
-
-const pickBalancer = (mode?: PisaBalanceMethod) => {
-  if (!mode) return completeWithFakeInput;
-  switch (mode) {
-    case "reBalanceCbor":
-      return completeWithRebalance;
-    case "balanceWithFakeInCbor":
-      return completeWithFakeInput;
-    default:
-      const _exhaustiveCheck: never = mode;
-      return _exhaustiveCheck;
-  }
-};
 
 const runWsRequest = (pws: PisaSocket, pisaRequest: PisaRequest) =>
   Effect.gen(function* () {
