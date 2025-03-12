@@ -38,18 +38,34 @@ export type PisaCompleteOptions = {
 };
 
 export type Pisa = {
+  /**
+   * Set a builder whose transaction should be completed with Pisa Fees service.
+   */
   usingBuilder: (builder: TxBuilder.TxBuilder) => {
     completeSafe: (
       position: OutRef,
       swapAssets: Unit[],
       options?: PisaCompleteOptions,
     ) => Promise<Either<TxSignBuilder.TxSignBuilder, TransactionError>>;
+
+    /**
+     * Complete transaction of selected builder using Pisa Fees service to balance transaction and pay fee with token(s).
+     *
+     * **Warning:** If `OutRef` of collateral is passed via options, this UTxO will be used exclusively as collateral
+     *  and will be excluded from balancing.
+     *
+     * **Warning:** Due to some technical limitations, all UTxOs w/o scripts and Datums sent to change address
+     * (most certainly) will be combined into single change UTxO.
+     */
     complete: (
       position: OutRef,
       swapAssets: Unit[],
       options?: PisaCompleteOptions,
     ) => Promise<TxSignBuilder.TxSignBuilder>;
   };
+  /**
+   * Close web socket connection to Pisa Fees service.
+   */
   finalize: () => void;
 };
 
