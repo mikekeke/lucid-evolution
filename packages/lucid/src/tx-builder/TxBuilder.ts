@@ -651,6 +651,15 @@ export function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder {
         const rawConfig = tx.rawConfig();
         config.programs = [...config.programs, ...tx.getPrograms()];
         config.scripts = new Map([...config.scripts, ...rawConfig.scripts]);
+        config.mintedAssets = Object.entries({
+          ...config.mintedAssets,
+          ...rawConfig.mintedAssets,
+        }).reduce<Assets>((acc, [key, value]) => {
+          acc[key as Unit | "lovelace"] =
+            (config.mintedAssets[key as Unit | "lovelace"] || 0n) +
+            BigInt(value);
+          return acc;
+        }, {});
       }
       return txBuilder;
     },

@@ -158,9 +158,6 @@ importers:
       '@anastasia-labs/cardano-multiplatform-lib-nodejs':
         specifier: 6.0.2-3
         version: 6.0.2-3
-      '@cardano-sdk/core':
-        specifier: ^0.45.1
-        version: 0.45.1
       '@effect/schema':
         specifier: ^0.66.16
         version: 0.66.16(effect@3.12.7)(fast-check@3.23.2)
@@ -340,6 +337,9 @@ importers:
       '@anastasia-labs/cardano-multiplatform-lib-nodejs':
         specifier: 6.0.2-3
         version: 6.0.2-3
+      '@cardano-sdk/core':
+        specifier: ^0.45.1
+        version: 0.45.1
       '@effect/schema':
         specifier: ^0.68.16
         version: 0.68.27(effect@3.12.7)
