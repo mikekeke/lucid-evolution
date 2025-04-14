@@ -398,7 +398,7 @@ const connect = async (url: string): Promise<PisaSocket> =>
               rejectInner("Pisa web socket connection was closed unexpectedly");
             wss.send(JSON.stringify(pisaRequest));
             wss.onmessage = (msg) => {
-              resolveInner(msg.data.text());
+              resolveInner(msg.data);
               // after message received, set on-close back to throwing exception to (again) prevent execution
               // from stopping silently in case of server disconnects
               wss.onclose = (_) => throwSocketClose();
