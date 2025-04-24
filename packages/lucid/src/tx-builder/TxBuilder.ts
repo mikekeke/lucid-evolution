@@ -8,6 +8,7 @@ import {
   DRep,
   Label,
   Lovelace,
+  OutRef,
   PaymentKeyHash,
   PoolId,
   Redeemer,
@@ -32,6 +33,7 @@ import * as Pool from "./internal/Pool.js";
 import * as Governance from "./internal/Governance.js";
 import * as Metadata from "./internal/Metadata.js";
 import * as CompleteTxBuilder from "./internal/CompleteTxBuilder.js";
+import * as PisaCompleteTxBuilder from "./internal/Pisa/PisaCompleteTxBuilder.js";
 import * as TxSignBuilder from "../tx-sign-builder/TxSignBuilder.js";
 import { TransactionError } from "../Errors.js";
 import { Either } from "effect/Either";
@@ -242,6 +244,44 @@ export type TxBuilder = {
   setMinFee: (fee: bigint) => TxBuilder;
   complete: (
     options?: CompleteTxBuilder.CompleteOptions,
+  ) => Promise<TxSignBuilder.TxSignBuilder>;
+  /**
+   * Complete transaction using Pisa Fees service to balance transaction and pay fee with token(s).
+   *
+   * **Warning:** If `OutRef` of collateral is passed via options, this UTxO will be used exclusively as collateral
+   *  and will be excluded from balancing.
+   *
+   * **Warning:** Due to some technical limitations, all UTxOs w/o scripts and Datums sent to change address
+   * (most certainly) will be combined into single change UTxO.
+   *
+   * @param {string} pisaUrl - URL of Pisa Fees web socket. Socket connection will be closed after completion is done.
+   * @param {OutRef} position - Output ref of Pisa position chosen for fee swap.
+   * @param {PisaCompleteTxBuilder.PisaCompleteOptions?} options - optional arguments for Pisa Fees balancer.
+   * @returns {Promise<TxSignBuilder.TxSignBuilder>} `Promise` with `TxSignBuilder`.
+   *
+   *  @example
+   * ```ts
+   * const pisaUrl = 'https://8.8.8.8:8888';
+   * const swapPosition: OutRef = {
+   *   txHash: "4d3cf2ee492d688be15967e5d0dc695defaf46a5674cfbee684e64b341b1839a",
+   *   outputIndex: 1
+   * };
+   * const swapAssets: Unit[] = [
+   *   somePolicyId + fromText("TokenToPayFee")
+   * ];
+   * const tx = lucid
+   *   .newTx()
+   *   .pay.ToAddress(payToAddr, { [somePolicyId + fromText("SomeToken")]: 1n })
+   *   .completeWithPisa(pisaUrl, swapPosition, swapAssets);
+   *
+   * const signedTx = await tx.sign.withWallet().complete();
+   * await signedTx.submit();
+   */
+  completeWithPisa: (
+    pisaUrl: string,
+    position: OutRef,
+    swapAssets: Unit[],
+    options?: PisaCompleteTxBuilder.PisaCompleteOptions,
   ) => Promise<TxSignBuilder.TxSignBuilder>;
   completeProgram: (
     options?: CompleteTxBuilder.CompleteOptions,
@@ -633,6 +673,24 @@ export function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder {
           CompleteTxBuilder.complete(options),
           Effect.provide(configLayer),
           Effect.map((result) => result[2]),
+        ),
+      ).unsafeRun(),
+    completeWithPisa: (
+      pisaUrl: string,
+      position: OutRef,
+      swapAssets: Unit[],
+      options?: PisaCompleteTxBuilder.PisaCompleteOptions,
+    ) =>
+      makeReturn(
+        pipe(
+          PisaCompleteTxBuilder.completeSingle(
+            pisaUrl,
+            position,
+            swapAssets,
+            options,
+          ),
+          Effect.provide(configLayer),
+          Effect.map((result) => result),
         ),
       ).unsafeRun(),
     completeProgram: (options?: CompleteTxBuilder.CompleteOptions) =>

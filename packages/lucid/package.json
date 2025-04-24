@@ -65,7 +65,8 @@
     "@lucid-evolution/uplc": "workspace:*",
     "@lucid-evolution/utils": "workspace:*",
     "@lucid-evolution/wallet": "workspace:*",
-    "effect": "^3.12.7"
+    "effect": "^3.12.7",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@effect/vitest": "^0.17.3",
